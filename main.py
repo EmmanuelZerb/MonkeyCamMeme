@@ -43,59 +43,42 @@ def check_folders():
 
 def main():
     """Point d'entrée principal de l'application."""
-    print("=" * 70)
-    print("  MemeMotion - Reconnaissance Faciale, Corporelle et des Mains")
-    print("=" * 70)
-    print()
+    print("\n" + "=" * 50)
+    print("  MemeMotion")
+    print("=" * 50 + "\n")
 
     # Vérification des dossiers
     check_folders()
 
-    # Vérification de la présence de memes (incluant .jpeg)
+    # Vérification de la présence de memes
     meme_count = (len(list(MEME_FOLDER.glob('*.jpg'))) +
                   len(list(MEME_FOLDER.glob('*.jpeg'))) +
                   len(list(MEME_FOLDER.glob('*.png'))))
     if meme_count == 0:
-        print("⚠️  ATTENTION: Aucune image de meme trouvée!")
-        print(f"   Ajoutez des images (.jpg, .jpeg ou .png) dans: {MEME_FOLDER}")
-        print("   L'application va démarrer mais ne pourra pas faire de matching.")
-        print()
+        print("ATTENTION: Aucune image trouvee")
+        print(f"Ajoutez des images dans: {MEME_FOLDER}\n")
 
     # Création de l'application Qt
     app = QApplication(sys.argv)
-
-    # Création de la fenêtre principale
     window = MemeMotionUI()
 
-    # Initialisation des composants
-    print("Initialisation des composants...")
-
+    # Initialisation
+    print("Initialisation...", end=" ")
     success = window.initialize_components(
         str(MEME_FOLDER),
         str(METADATA_FILE)
     )
 
     if success:
-        print("✓ Composants initialisés avec succès")
-        print()
-        print("🎭 Application prête!")
-        print("   👤 Détection faciale : 468 points du visage")
-        print("   🤸 Détection corporelle : 33 points du corps")
-        print("   ✋ Détection des mains : 21 points par main avec TOUS les doigts")
-        print("   🎯 Le meme correspondant s'affiche automatiquement")
-        print()
-        print("Faites des grimaces, des poses ou des gestes avec vos mains ! 🚀")
-        print("L'application détecte maintenant chaque doigt individuellement !")
-        print()
+        print("OK\n")
+        print(f"{meme_count} memes charges")
+        print("Pret.\n")
 
-        # Affichage de la fenêtre
         window.show()
-
-        # Lancement de la boucle événementielle
         sys.exit(app.exec_())
     else:
-        print("❌ Erreur lors de l'initialisation")
-        print("   Vérifiez que votre webcam est connectée et accessible")
+        print("ERREUR")
+        print("Verifiez votre webcam\n")
         sys.exit(1)
 
 

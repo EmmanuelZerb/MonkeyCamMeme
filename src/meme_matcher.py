@@ -14,6 +14,7 @@ from .face_detector import FaceDetector
 from .expression_analyzer import ExpressionAnalyzer
 from .pose_detector import PoseDetector
 from .pose_analyzer import PoseAnalyzer
+from .hand_detector import HandDetector
 
 
 class MemeMatcher:
@@ -34,9 +35,10 @@ class MemeMatcher:
         self.expression_analyzer = ExpressionAnalyzer()
         self.pose_detector = PoseDetector()
         self.pose_analyzer = PoseAnalyzer()
+        self.hand_detector = HandDetector()
 
         # Seuil pour affichage automatique du meme
-        self.AUTO_DISPLAY_THRESHOLD = 70.0  # Réduit pour afficher plus facilement
+        self.AUTO_DISPLAY_THRESHOLD = 65.0  # Seuil ajusté pour meilleur matching
 
     def load_or_generate_metadata(self) -> bool:
         """
@@ -94,14 +96,16 @@ class MemeMatcher:
                     print(f"Erreur: Impossible de charger {meme_path.name}")
                     continue
 
-                # Détection du visage et de la pose
+                # Détection du visage, de la pose ET des mains
                 face_detection = self.face_detector.detect_face(image)
                 pose_detection = self.pose_detector.detect_pose(image)
+                hands_detection = self.hand_detector.detect_hands(image)
 
-                # Au moins un des deux doit être détecté
+                # Au moins un des trois doit être détecté
                 if (not face_detection or not face_detection['face_found']) and \
-                   (not pose_detection or not pose_detection['pose_found']):
-                    print(f"Aucun visage ou pose détecté dans {meme_path.name}")
+                   (not pose_detection or not pose_detection['pose_found']) and \
+                   (not hands_detection or not hands_detection['hands_found']):
+                    print(f"Aucun visage, pose ou mains détectés dans {meme_path.name}")
                     continue
 
                 # Analyse de l'expression faciale
@@ -114,7 +118,12 @@ class MemeMatcher:
                 if pose_detection and pose_detection['pose_found']:
                     pose_features = self.pose_analyzer.analyze_pose(pose_detection)
 
-                if face_features is None and pose_features is None:
+                # Analyse des mains (nouvellement ajouté)
+                hands_features = None
+                if hands_detection and hands_detection['hands_found']:
+                    hands_features = self._analyze_hands(hands_detection)
+
+                if face_features is None and pose_features is None and hands_features is None:
                     print(f"Erreur d'analyse pour {meme_path.name}")
                     continue
 
@@ -122,12 +131,13 @@ class MemeMatcher:
                 meme_id = meme_path.stem
                 meme_name = meme_id.replace('_', ' ').title()
 
-                # Ajout à la base de données avec les deux types de features
+                # Ajout à la base de données avec les trois types de features
                 self.meme_database[meme_id] = {
                     'name': meme_name,
                     'image': meme_path.name,
                     'face_features': face_features,
-                    'pose_features': pose_features
+                    'pose_features': pose_features,
+                    'hands_features': hands_features
                 }
 
                 detection_types = []
@@ -135,8 +145,10 @@ class MemeMatcher:
                     detection_types.append("visage")
                 if pose_features:
                     detection_types.append("pose")
+                if hands_features:
+                    detection_types.append("mains")
 
-                print(f"✓ {meme_name} analysé ({', '.join(detection_types)})")
+                print(f"{meme_name} analyse ({', '.join(detection_types)})")
 
             except Exception as e:
                 print(f"Erreur lors de l'analyse de {meme_path.name}: {e}")
@@ -155,6 +167,60 @@ class MemeMatcher:
         else:
             print("Aucun meme valide trouvé")
             return False
+
+    def _analyze_hands(self, hands_detection: Dict) -> Optional[Dict[str, float]]:
+        """
+        Analyze hands detection and extract features.
+
+        Args:
+            hands_detection: Résultat de HandDetector.detect_hands()
+
+        Returns:
+            Dict contenant les features des mains
+        """
+        if not hands_detection or not hands_detection['hands_found']:
+            return None
+
+        features = {}
+
+        # Initialiser toutes les features à 0
+        features['left_hand_present'] = 0.0
+        features['right_hand_present'] = 0.0
+        features['left_fingers_extended'] = 0.0
+        features['right_fingers_extended'] = 0.0
+        features['both_hands_present'] = 0.0
+        features['hands_distance'] = 0.0
+
+        left_hand = None
+        right_hand = None
+
+        # Séparer les mains gauche et droite
+        for hand_data in hands_detection['hands']:
+            if hand_data['handedness'] == 'Left':
+                left_hand = hand_data
+            elif hand_data['handedness'] == 'Right':
+                right_hand = hand_data
+
+        # Analyser la main gauche
+        if left_hand:
+            features['left_hand_present'] = 1.0
+            features['left_fingers_extended'] = self.hand_detector.count_extended_fingers(left_hand['landmarks']) / 5.0
+
+        # Analyser la main droite
+        if right_hand:
+            features['right_hand_present'] = 1.0
+            features['right_fingers_extended'] = self.hand_detector.count_extended_fingers(right_hand['landmarks']) / 5.0
+
+        # Les deux mains présentes
+        if left_hand and right_hand:
+            features['both_hands_present'] = 1.0
+            # Distance entre les mains
+            left_wrist = left_hand['landmarks'][0]
+            right_wrist = right_hand['landmarks'][0]
+            distance = np.sqrt((right_wrist[0] - left_wrist[0])**2 + (right_wrist[1] - left_wrist[1])**2)
+            features['hands_distance'] = float(distance)
+
+        return features
 
     def calculate_cosine_similarity(self, vec1: np.ndarray, vec2: np.ndarray) -> float:
         """
@@ -183,13 +249,15 @@ class MemeMatcher:
         return float(similarity)
 
     def find_best_match(self, current_face_features: Optional[Dict[str, float]],
-                       current_pose_features: Optional[Dict[str, float]]) -> Optional[Tuple[str, str, float, str]]:
+                       current_pose_features: Optional[Dict[str, float]],
+                       current_hands_features: Optional[Dict[str, float]] = None) -> Optional[Tuple[str, str, float, str]]:
         """
-        Find best matching meme for current expression and pose.
+        Find best matching meme for current expression, pose and hands.
 
         Args:
             current_face_features: Features de l'expression faciale actuelle
             current_pose_features: Features de la pose corporelle actuelle
+            current_hands_features: Features des mains actuelles
 
         Returns:
             Tuple (meme_id, meme_name, score, image_path) du meilleur match,
@@ -207,7 +275,11 @@ class MemeMatcher:
         if current_pose_features:
             current_pose_vector = self.pose_analyzer.features_to_vector(current_pose_features)
 
-        if current_face_vector is None and current_pose_vector is None:
+        current_hands_vector = None
+        if current_hands_features:
+            current_hands_vector = self._hands_features_to_vector(current_hands_features)
+
+        if current_face_vector is None and current_pose_vector is None and current_hands_vector is None:
             return None
 
         best_match = None
@@ -215,22 +287,29 @@ class MemeMatcher:
 
         # Comparaison avec tous les memes
         for meme_id, meme_data in self.meme_database.items():
-            # Calcul du score combiné (visage + pose)
+            # Calcul du score combiné (visage + mains prioritaires, pose secondaire)
             total_score = 0.0
             weight_sum = 0.0
 
-            # Score du visage (poids 0.6)
+            # Score du visage (poids 0.4)
             if current_face_vector is not None and meme_data.get('face_features'):
                 meme_face_vector = self.expression_analyzer.features_to_vector(meme_data['face_features'])
                 face_similarity = self.calculate_cosine_similarity(current_face_vector, meme_face_vector)
-                total_score += face_similarity * 0.6
-                weight_sum += 0.6
+                total_score += face_similarity * 0.4
+                weight_sum += 0.4
 
-            # Score de la pose (poids 0.4)
+            # Score de la pose (poids 0.2 - pour supporter les images sans visage/mains)
             if current_pose_vector is not None and meme_data.get('pose_features'):
                 meme_pose_vector = self.pose_analyzer.features_to_vector(meme_data['pose_features'])
                 pose_similarity = self.calculate_cosine_similarity(current_pose_vector, meme_pose_vector)
-                total_score += pose_similarity * 0.4
+                total_score += pose_similarity * 0.2
+                weight_sum += 0.2
+
+            # Score des mains (poids 0.4)
+            if current_hands_vector is not None and meme_data.get('hands_features'):
+                meme_hands_vector = self._hands_features_to_vector(meme_data['hands_features'])
+                hands_similarity = self.calculate_cosine_similarity(current_hands_vector, meme_hands_vector)
+                total_score += hands_similarity * 0.4
                 weight_sum += 0.4
 
             # Si aucun match possible, passer au suivant
@@ -293,10 +372,28 @@ class MemeMatcher:
         """
         return [data['name'] for data in self.meme_database.values()]
 
+    def _hands_features_to_vector(self, features: Dict[str, float]) -> np.ndarray:
+        """Convert hands features dict to numpy vector."""
+        feature_names = [
+            'left_hand_present',
+            'right_hand_present',
+            'left_fingers_extended',
+            'right_fingers_extended',
+            'both_hands_present',
+            'hands_distance'
+        ]
+
+        vector = []
+        for name in feature_names:
+            vector.append(features.get(name, 0.0))
+
+        return np.array(vector, dtype=np.float32)
+
     def close(self):
         """Release resources."""
         self.face_detector.close()
         self.pose_detector.close()
+        self.hand_detector.close()
 
     def __del__(self):
         """Destructor."""
