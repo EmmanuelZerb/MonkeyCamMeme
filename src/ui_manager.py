@@ -16,6 +16,7 @@ from .face_detector import FaceDetector
 from .expression_analyzer import ExpressionAnalyzer
 from .pose_detector import PoseDetector
 from .pose_analyzer import PoseAnalyzer
+from .hand_detector import HandDetector
 from .meme_matcher import MemeMatcher
 
 
@@ -36,6 +37,7 @@ class MemeMotionUI(QMainWindow):
         self.expression_analyzer: Optional[ExpressionAnalyzer] = None
         self.pose_detector: Optional[PoseDetector] = None
         self.pose_analyzer: Optional[PoseAnalyzer] = None
+        self.hand_detector: Optional[HandDetector] = None
         self.meme_matcher: Optional[MemeMatcher] = None
 
         # État de l'application
@@ -109,18 +111,11 @@ class MemeMotionUI(QMainWindow):
         # === SECTION INFO ===
         info_layout = QHBoxLayout()
 
-        # Label du score
-        self.score_label = QLabel("Score: ---%")
-        self.score_label.setAlignment(Qt.AlignCenter)
-        self.score_label.setFont(QFont("Arial", 24, QFont.Bold))
-        self.score_label.setStyleSheet("color: #00ff00; padding: 10px;")
-        info_layout.addWidget(self.score_label)
-
-        # Label du nom du meme
+        # Label du nom du meme (centré et plus grand)
         self.meme_name_label = QLabel("En attente...")
         self.meme_name_label.setAlignment(Qt.AlignCenter)
-        self.meme_name_label.setFont(QFont("Arial", 18))
-        self.meme_name_label.setStyleSheet("color: #ffffff; padding: 10px;")
+        self.meme_name_label.setFont(QFont("Arial", 24, QFont.Bold))
+        self.meme_name_label.setStyleSheet("color: #ffffff; padding: 20px;")
         info_layout.addWidget(self.meme_name_label)
 
         main_layout.addLayout(info_layout)
@@ -198,6 +193,12 @@ class MemeMotionUI(QMainWindow):
             # Initialisation de l'analyseur de poses
             self.pose_analyzer = PoseAnalyzer()
 
+            # Initialisation du détecteur de mains
+            self.hand_detector = HandDetector(
+                min_detection_confidence=0.7,
+                min_tracking_confidence=0.5
+            )
+
             # Initialisation du matcher de memes
             self.meme_matcher = MemeMatcher(meme_folder, metadata_file)
             if not self.meme_matcher.load_or_generate_metadata():
@@ -225,9 +226,10 @@ class MemeMotionUI(QMainWindow):
 
         self.current_frame = frame.copy()
 
-        # Détection du visage et de la pose
+        # Détection du visage, de la pose ET des mains
         face_detection = self.face_detector.detect_face(frame)
         pose_detection = self.pose_detector.detect_pose(frame)
+        hands_detection = self.hand_detector.detect_hands(frame)
 
         # Dessin des détections sur la frame
         frame_annotated = frame.copy()
@@ -248,6 +250,17 @@ class MemeMotionUI(QMainWindow):
             # Analyse de la pose
             pose_features = self.pose_analyzer.analyze_pose(pose_detection)
 
+        # Dessin des mains (par-dessus tout le reste pour plus de visibilité)
+        if hands_detection and hands_detection['hands_found']:
+            frame_annotated = self.hand_detector.draw_hands(frame_annotated, hands_detection)
+
+            # Afficher le nombre de doigts levés pour chaque main
+            for hand_data in hands_detection['hands']:
+                fingers_count = self.hand_detector.count_extended_fingers(hand_data['landmarks'])
+                # Afficher dans la console pour debugging
+                if fingers_count > 0:
+                    print(f"{hand_data['handedness']}: {fingers_count} doigts levés")
+
         # Si au moins l'un des deux est détecté
         if face_features is not None or pose_features is not None:
             # Matching avec les memes
@@ -257,14 +270,13 @@ class MemeMotionUI(QMainWindow):
                 meme_id, meme_name, score, meme_path = match
                 self.current_match = match
 
-                # Mise à jour de l'affichage
-                self.update_score_display(score)
-
                 detection_info = []
                 if face_features:
                     detection_info.append("👤")
                 if pose_features:
                     detection_info.append("🤸")
+                if hands_detection and hands_detection['hands_found']:
+                    detection_info.append("✋")
 
                 self.meme_name_label.setText(f"{' '.join(detection_info)} {meme_name}")
 
@@ -277,7 +289,7 @@ class MemeMotionUI(QMainWindow):
                             self.current_meme_image = meme_image
                             self.display_meme_image(meme_image)
                             self.last_displayed_meme = meme_id
-                            self.show_notification(f"🎯 Match trouvé ! {meme_name} ({int(score)}%)")
+                            self.show_notification(f"🎯 Match trouvé ! {meme_name}")
                 else:
                     # Si le score est trop bas, effacer le meme affiché
                     if self.last_displayed_meme is not None:
@@ -289,7 +301,6 @@ class MemeMotionUI(QMainWindow):
         else:
             # Aucune détection
             self.display_user_frame(frame)
-            self.score_label.setText("Score: ---%")
             self.meme_name_label.setText("⏳ En attente de détection...")
             if self.last_displayed_meme is not None:
                 self.clear_meme_display()
@@ -328,23 +339,6 @@ class MemeMotionUI(QMainWindow):
         self.meme_video_label.clear()
         self.meme_video_label.setStyleSheet("background-color: #2b2b2b;")
 
-    def update_score_display(self, score: float):
-        """Update score display with color coding."""
-        score_int = int(score)
-        self.score_label.setText(f"Score: {score_int}%")
-
-        # Changement de couleur selon le score
-        if score >= 85:
-            color = "#00ff00"  # Vert
-        elif score >= 70:
-            color = "#ffff00"  # Jaune
-        elif score >= 50:
-            color = "#ff9900"  # Orange
-        else:
-            color = "#ff0000"  # Rouge
-
-        self.score_label.setStyleSheet(f"color: {color}; padding: 10px;")
-
     def show_notification(self, message: str):
         """Show temporary notification."""
         self.notification_label.setText(message)
@@ -375,6 +369,9 @@ class MemeMotionUI(QMainWindow):
 
         if self.pose_detector:
             self.pose_detector.close()
+
+        if self.hand_detector:
+            self.hand_detector.close()
 
         if self.meme_matcher:
             self.meme_matcher.close()

@@ -8,6 +8,10 @@ import numpy as np
 from typing import Optional, List, Dict, Tuple
 import urllib.request
 import os
+import logging
+
+# Suppression des logs de MediaPipe
+logging.getLogger('mediapipe').setLevel(logging.ERROR)
 
 
 class PoseDetector:
@@ -168,7 +172,7 @@ class PoseDetector:
 
     def draw_pose(self, frame: np.ndarray, detection_result: Dict) -> np.ndarray:
         """
-        Draw pose landmarks on frame.
+        Draw pose landmarks on frame with enhanced hand visibility.
 
         Args:
             frame: Image BGR depuis OpenCV
@@ -192,7 +196,7 @@ class PoseDetector:
                 visibility = landmark[3]
                 landmark_points.append((x, y, visibility))
 
-            # Dessiner les connexions (squelette)
+            # Dessiner les connexions (squelette) avec différentes couleurs
             for connection in self.POSE_CONNECTIONS:
                 start_idx, end_idx = connection
                 if start_idx < len(landmark_points) and end_idx < len(landmark_points):
@@ -201,15 +205,25 @@ class PoseDetector:
 
                     # Ne dessiner que si les deux points sont visibles
                     if start_point[2] > 0.5 and end_point[2] > 0.5:
+                        # Couleur verte pour tout
+                        color = (0, 255, 0)  # Vert
+                        thickness = 2
+
                         cv2.line(frame,
                                 (start_point[0], start_point[1]),
                                 (end_point[0], end_point[1]),
-                                (0, 255, 0), 2)
+                                color, thickness)
 
             # Dessiner les landmarks comme des cercles
-            for point in landmark_points:
+            for idx, point in enumerate(landmark_points):
                 if point[2] > 0.5:  # Seulement si visible
-                    cv2.circle(frame, (point[0], point[1]), 4, (0, 0, 255), -1)
+                    # Tous les points en vert/jaune/rouge selon la partie du corps
+                    if idx in [11, 12, 13, 14]:
+                        # Bras : cercles moyens en jaune
+                        cv2.circle(frame, (point[0], point[1]), 5, (0, 255, 255), -1)
+                    else:
+                        # Reste du corps : petits cercles rouges
+                        cv2.circle(frame, (point[0], point[1]), 4, (0, 0, 255), -1)
 
             return frame
 

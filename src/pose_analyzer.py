@@ -15,7 +15,7 @@ class PoseAnalyzer:
         """Initialize pose analyzer."""
         # Liste ordonnée des features pour la vectorisation
         self.feature_names = [
-            # Angles des bras
+            # Angles des bras (poids important)
             'left_arm_angle',
             'right_arm_angle',
             'left_elbow_angle',
@@ -27,11 +27,27 @@ class PoseAnalyzer:
             'left_knee_angle',
             'right_knee_angle',
 
-            # Position des mains
+            # Position des mains (TRÈS IMPORTANT - ajout de plus de features)
             'left_hand_height',
             'right_hand_height',
             'left_hand_lateral',
             'right_hand_lateral',
+            'left_hand_distance_to_face',   # Nouvelle feature
+            'right_hand_distance_to_face',  # Nouvelle feature
+            'hands_distance',                # Nouvelle feature
+            'left_hand_above_head',          # Nouvelle feature
+            'right_hand_above_head',         # Nouvelle feature
+            'hands_crossed',                 # Nouvelle feature
+
+            # Détails des doigts de la main gauche
+            'left_thumb_extended',
+            'left_index_extended',
+            'left_pinky_extended',
+
+            # Détails des doigts de la main droite
+            'right_thumb_extended',
+            'right_index_extended',
+            'right_pinky_extended',
 
             # Position globale du corps
             'body_lean_angle',
@@ -79,11 +95,29 @@ class PoseAnalyzer:
             features['left_knee_angle'] = self._calculate_knee_angle(landmarks, 'left')
             features['right_knee_angle'] = self._calculate_knee_angle(landmarks, 'right')
 
-            # Position des mains
+            # Position des mains (features de base)
             features['left_hand_height'] = self._calculate_hand_height(landmarks, 'left')
             features['right_hand_height'] = self._calculate_hand_height(landmarks, 'right')
             features['left_hand_lateral'] = self._calculate_hand_lateral(landmarks, 'left')
             features['right_hand_lateral'] = self._calculate_hand_lateral(landmarks, 'right')
+
+            # Nouvelles features pour les mains (plus de détails)
+            features['left_hand_distance_to_face'] = self._calculate_hand_to_face_distance(landmarks, 'left')
+            features['right_hand_distance_to_face'] = self._calculate_hand_to_face_distance(landmarks, 'right')
+            features['hands_distance'] = self._calculate_hands_distance(landmarks)
+            features['left_hand_above_head'] = self._is_hand_above_head(landmarks, 'left')
+            features['right_hand_above_head'] = self._is_hand_above_head(landmarks, 'right')
+            features['hands_crossed'] = self._are_hands_crossed(landmarks)
+
+            # Position des doigts (main gauche)
+            features['left_thumb_extended'] = self._is_finger_extended(landmarks, 'left', 'thumb')
+            features['left_index_extended'] = self._is_finger_extended(landmarks, 'left', 'index')
+            features['left_pinky_extended'] = self._is_finger_extended(landmarks, 'left', 'pinky')
+
+            # Position des doigts (main droite)
+            features['right_thumb_extended'] = self._is_finger_extended(landmarks, 'right', 'thumb')
+            features['right_index_extended'] = self._is_finger_extended(landmarks, 'right', 'index')
+            features['right_pinky_extended'] = self._is_finger_extended(landmarks, 'right', 'pinky')
 
             # Position globale du corps
             features['body_lean_angle'] = self._calculate_body_lean(landmarks)
@@ -314,9 +348,81 @@ class PoseAnalyzer:
 
         return np.array(vector, dtype=np.float32)
 
+    def _calculate_hand_to_face_distance(self, landmarks: list, side: str) -> float:
+        """Calculate distance between hand and face."""
+        wrist_idx = 15 if side == 'left' else 16
+        nose_idx = 0
+
+        wrist = landmarks[wrist_idx]
+        nose = landmarks[nose_idx]
+
+        distance = np.sqrt((wrist[0] - nose[0])**2 + (wrist[1] - nose[1])**2)
+        return float(distance)
+
+    def _calculate_hands_distance(self, landmarks: list) -> float:
+        """Calculate distance between both hands."""
+        left_wrist = landmarks[15]
+        right_wrist = landmarks[16]
+
+        distance = np.sqrt((right_wrist[0] - left_wrist[0])**2 +
+                          (right_wrist[1] - left_wrist[1])**2)
+        return float(distance)
+
+    def _is_hand_above_head(self, landmarks: list, side: str) -> float:
+        """Check if hand is above head (returns 1.0 if yes, 0.0 if no)."""
+        wrist_idx = 15 if side == 'left' else 16
+        nose_idx = 0
+
+        wrist_y = landmarks[wrist_idx][1]
+        nose_y = landmarks[nose_idx][1]
+
+        # Retourne 1.0 si la main est au-dessus de la tête
+        return 1.0 if wrist_y < nose_y else 0.0
+
+    def _are_hands_crossed(self, landmarks: list) -> float:
+        """Check if hands are crossed (returns 1.0 if yes, 0.0 if no)."""
+        left_wrist = landmarks[15]
+        right_wrist = landmarks[16]
+        left_shoulder = landmarks[11]
+        right_shoulder = landmarks[12]
+
+        # Les mains sont croisées si la main gauche est plus à droite que l'épaule droite
+        # ou si la main droite est plus à gauche que l'épaule gauche
+        left_crossed = left_wrist[0] > right_shoulder[0]
+        right_crossed = right_wrist[0] < left_shoulder[0]
+
+        return 1.0 if (left_crossed or right_crossed) else 0.0
+
+    def _is_finger_extended(self, landmarks: list, side: str, finger: str) -> float:
+        """
+        Check if a finger is extended.
+        Returns distance between finger tip and wrist (normalized).
+        """
+        wrist_idx = 15 if side == 'left' else 16
+
+        # Indices des doigts
+        finger_indices = {
+            'thumb': 21 if side == 'left' else 22,
+            'index': 19 if side == 'left' else 20,
+            'pinky': 17 if side == 'left' else 18
+        }
+
+        if finger not in finger_indices:
+            return 0.0
+
+        finger_idx = finger_indices[finger]
+        wrist = landmarks[wrist_idx]
+        finger_tip = landmarks[finger_idx]
+
+        # Distance entre le bout du doigt et le poignet
+        distance = np.sqrt((finger_tip[0] - wrist[0])**2 +
+                          (finger_tip[1] - wrist[1])**2)
+
+        return float(distance)
+
     def get_feature_description(self, features: Dict[str, float]) -> str:
         """
-        Get human-readable description of the pose.
+        Get human-readable description of the pose with focus on hands.
 
         Args:
             features: Dictionnaire de features
@@ -325,6 +431,37 @@ class PoseAnalyzer:
             Description textuelle de la pose
         """
         descriptions = []
+
+        # Analyse des mains (PRIORITÉ)
+        left_hand_above = features.get('left_hand_above_head', 0)
+        right_hand_above = features.get('right_hand_above_head', 0)
+
+        if left_hand_above > 0.5 and right_hand_above > 0.5:
+            descriptions.append("✋ Les deux mains au-dessus de la tête")
+        elif left_hand_above > 0.5:
+            descriptions.append("✋ Main gauche levée")
+        elif right_hand_above > 0.5:
+            descriptions.append("✋ Main droite levée")
+
+        # Mains croisées
+        if features.get('hands_crossed', 0) > 0.5:
+            descriptions.append("✋ Mains croisées")
+
+        # Distance des mains
+        hands_dist = features.get('hands_distance', 0)
+        if hands_dist > 0.5:
+            descriptions.append("✋ Mains écartées")
+        elif hands_dist < 0.2:
+            descriptions.append("✋ Mains rapprochées")
+
+        # Distance main-visage
+        left_hand_to_face = features.get('left_hand_distance_to_face', 1)
+        right_hand_to_face = features.get('right_hand_distance_to_face', 1)
+
+        if left_hand_to_face < 0.2:
+            descriptions.append("✋ Main gauche près du visage")
+        if right_hand_to_face < 0.2:
+            descriptions.append("✋ Main droite près du visage")
 
         # Analyse des bras
         left_arm = features.get('left_arm_angle', 0)
@@ -336,13 +473,6 @@ class PoseAnalyzer:
             descriptions.append("Bras baissés")
         elif abs(left_arm - right_arm) > 40:
             descriptions.append("Bras asymétriques")
-
-        # Analyse des mains
-        left_hand_height = features.get('left_hand_height', 0)
-        right_hand_height = features.get('right_hand_height', 0)
-
-        if left_hand_height < -0.5 or right_hand_height < -0.5:
-            descriptions.append("Mains en l'air")
 
         # Analyse du corps
         lean = features.get('body_lean_angle', 0)

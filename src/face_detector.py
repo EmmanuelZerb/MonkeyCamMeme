@@ -8,6 +8,10 @@ import numpy as np
 from typing import Optional, List, Dict, Tuple
 import urllib.request
 import os
+import logging
+
+# Suppression des logs de MediaPipe
+logging.getLogger('mediapipe').setLevel(logging.ERROR)
 
 
 class FaceDetector:

@@ -8,8 +8,20 @@ Compare vos expressions faciales en temps réel avec des memes iconiques
 import sys
 import os
 from pathlib import Path
-from PyQt5.QtWidgets import QApplication
 
+# IMPORTANT: Rediriger stderr AVANT tout import pour supprimer les warnings MediaPipe
+_original_stderr = sys.stderr
+sys.stderr = open(os.devnull, 'w')
+
+# Suppression des warnings de TensorFlow et MediaPipe
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['GLOG_minloglevel'] = '3'
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+
+import warnings
+warnings.filterwarnings('ignore')
+
+from PyQt5.QtWidgets import QApplication
 from src.ui_manager import MemeMotionUI
 
 
@@ -31,9 +43,9 @@ def check_folders():
 
 def main():
     """Point d'entrée principal de l'application."""
-    print("=" * 65)
-    print("  MemeMotion - Reconnaissance d'Expressions et Poses Corporelles")
-    print("=" * 65)
+    print("=" * 70)
+    print("  MemeMotion - Reconnaissance Faciale, Corporelle et des Mains")
+    print("=" * 70)
     print()
 
     # Vérification des dossiers
@@ -57,19 +69,23 @@ def main():
 
     # Initialisation des composants
     print("Initialisation des composants...")
-    if window.initialize_components(
+
+    success = window.initialize_components(
         str(MEME_FOLDER),
         str(METADATA_FILE)
-    ):
+    )
+
+    if success:
         print("✓ Composants initialisés avec succès")
         print()
         print("🎭 Application prête!")
-        print("   - La webcam capture vos expressions et poses en temps réel")
-        print("   - Détection faciale ET corporelle simultanées")
-        print("   - Le meme correspondant s'affiche automatiquement (score > 70%)")
-        print("   - Les memes changent dynamiquement selon vos mouvements")
+        print("   👤 Détection faciale : 468 points du visage")
+        print("   🤸 Détection corporelle : 33 points du corps")
+        print("   ✋ Détection des mains : 21 points par main avec TOUS les doigts")
+        print("   🎯 Le meme correspondant s'affiche automatiquement")
         print()
-        print("Faites des grimaces ou des poses pour voir les memes correspondants! 🚀")
+        print("Faites des grimaces, des poses ou des gestes avec vos mains ! 🚀")
+        print("L'application détecte maintenant chaque doigt individuellement !")
         print()
 
         # Affichage de la fenêtre
